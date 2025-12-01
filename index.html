@@ -8,6 +8,7 @@ body { font-family: sans-serif; padding: 20px; }
 #question { font-size: 24px; margin-bottom: 10px; }
 #time, #score { margin-top: 10px; }
 button { margin: 5px; padding: 10px; }
+#drawing { border:1px solid #000; touch-action: none; }
 </style>
 </head>
 <body>
@@ -24,10 +25,15 @@ button { margin: 5px; padding: 10px; }
 <div id="game" style="display:none;">
   <div id="question"></div>
   <input type="text" id="answer" placeholder="答えを入力">
+  <button onclick="toggleMinus()">±</button>
   <button onclick="checkAnswer()">解答</button>
   <div id="time"></div>
   <div id="score"></div>
   <button onclick="backHome()">ホームに戻る</button>
+
+  <h3>メモ欄</h3>
+  <canvas id="drawing" width="300" height="200"></canvas><br>
+  <button onclick="clearCanvas()">リセット</button>
 </div>
 
 <script>
@@ -36,6 +42,17 @@ let score = 0;
 let questionCount = 0;
 const maxQuestions = 10;
 let startTime, totalTime = 0;
+
+const canvas = document.getElementById('drawing');
+const ctx = canvas.getContext('2d');
+let drawing = false;
+
+canvas.addEventListener('pointerdown', e=>{drawing=true; ctx.beginPath(); ctx.moveTo(e.offsetX,e.offsetY);});
+canvas.addEventListener('pointermove', e=>{if(drawing){ctx.lineTo(e.offsetX,e.offsetY); ctx.stroke();}});
+canvas.addEventListener('pointerup', e=>{drawing=false;});
+canvas.addEventListener('pointerleave', e=>{drawing=false;});
+
+function clearCanvas(){ctx.clearRect(0,0,canvas.width,canvas.height);}
 
 function startGame(selectedMode) {
   mode = selectedMode;
@@ -46,95 +63,79 @@ function startGame(selectedMode) {
   document.getElementById('game').style.display = 'block';
   generateQuestion();
   updateScore();
+  clearCanvas();
 }
 
 function generateQuestion() {
-  const r = () => Math.random();
-  a = Math.floor(r()*5)+1;  //1-5
-  b = Math.floor(r()*21)-10; //-10~10
+  const r = ()=>Math.random();
+  a = Math.floor(r()*5)+1;
+  b = Math.floor(r()*21)-10;
 
   const type = Math.floor(r()*3);
-  if(type===0) xAnswer = Math.floor(r()*21)-10;
-  else if(type===1) xAnswer = Math.round((Math.floor(r()*201)-100)/1*10)/10;
-  else {
-    let denom = Math.floor(r()*9)+2;
-    let numer = Math.floor(r()*denom*10+1)-denom*5;
-    xAnswer = numer/denom;
-  }
+  if(type===0) xAnswer=Math.floor(r()*21)-10;
+  else if(type===1) xAnswer=Math.round((Math.floor(r()*201)-100)/10*10)/10;
+  else {let denom=Math.floor(r()*9)+2; let numer=Math.floor(r()*denom*10+1)-denom*5; xAnswer=numer/denom;}
 
-  c = a*xAnswer + b;
-
-  let cStr = (type===2)? toFraction(c) : (Math.round(c*10)/10);
-
-  let q = a + "x " + (b>=0? "+ ":"- ") + Math.abs(b) + " = " + cStr;
-  document.getElementById('question').innerText = q + " を解け";
-  document.getElementById('answer').value = "";
-  document.getElementById('time').innerText = "";
-  startTime = Date.now();
+  c=a*xAnswer+b;
+  let cStr=(type===2)?toFraction(c):(Math.round(c*10)/10);
+  let q=a+"x "+(b>=0?"+ ":"- ")+Math.abs(b)+" = "+cStr;
+  document.getElementById('question').innerText=q+" を解け";
+  document.getElementById('answer').value="";
+  document.getElementById('time').innerText="";
+  startTime=Date.now();
 }
 
-function checkAnswer() {
-  let input = document.getElementById('answer').value.trim();
+function checkAnswer(){
+  let input=document.getElementById('answer').value.trim();
   let userAns;
-  if(input.includes('/')) {
-    let parts = input.split('/');
-    if(parts.length!==2){ alert("分数は a/b の形式で"); return; }
-    userAns = parseFloat(parts[0])/parseFloat(parts[1]);
-  } else {
-    userAns = parseFloat(input);
-  }
+  try{
+    if(input.includes('/')){
+      let parts=input.split('/');
+      if(parts.length!==2){ alert("分数は a/b の形式で"); return; }
+      userAns=parseFloat(parts[0])/parseFloat(parts[1]);
+    } else {
+      userAns=parseFloat(input);
+    }
+  }catch(e){document.getElementById('time').innerText="数字または分数を入力してね！"; return;}
 
-  let elapsed = (Date.now()-startTime)/1000;
+  let elapsed=(Date.now()-startTime)/1000;
 
-  if(Math.abs(userAns - xAnswer)<0.1){
-    // 正解
+  if(Math.abs(userAns-xAnswer)<0.1){
     score++;
     updateScore();
     if(mode==='measure'){
       questionCount++;
-      totalTime += elapsed;
+      totalTime+=elapsed;
       if(questionCount>=maxQuestions){
         alert("測定終了！ 10問の合計時間: "+totalTime+" 秒");
         backHome();
         return;
       }
     }
-    document.getElementById('time').innerText = "正解！ "+elapsed+" 秒";
+    document.getElementById('time').innerText="正解！ "+elapsed+" 秒";
     generateQuestion();
   } else {
-    // 不正解
     if(mode==='challenge'){
       alert("不正解！ 正しい答え: "+toFraction(xAnswer));
       backHome();
       return;
     }
     if(mode==='random'){
-      document.getElementById('time').innerText = "不正解！ もう一度解こう";
+      document.getElementById('time').innerText="不正解！ もう一度解こう";
       return;
     }
     if(mode==='measure'){
-      document.getElementById('time').innerText = "不正解！ もう一度解こう";
+      document.getElementById('time').innerText="不正解！ もう一度解こう";
       return;
     }
   }
 }
 
-function updateScore(){
-  document.getElementById('score').innerText = "解いた問題数: "+score;
-}
-
-function backHome(){
-  document.getElementById('home').style.display = 'block';
-  document.getElementById('game').style.display = 'none';
-}
-
-function toFraction(x){
-  let denom=1;
-  while(Math.abs(x*denom - Math.round(x*denom))>0.001 && denom<=10){ denom++; }
-  let numer = Math.round(x*denom);
-  if(denom===1) return numer.toString();
-  return numer+"/"+denom;
-}
+function updateScore(){document.getElementById('score').innerText="解いた問題数: "+score;}
+function backHome(){document.getElementById('home').style.display='block'; document.getElementById('game').style.display='none';}
+function toggleMinus(){let input=document.getElementById('answer'); if(input.value.startsWith('-')) input.value=input.value.substring(1); else input.value='-'+input.value; input.focus();}
+function toFraction(x){let denom=1; while(Math.abs(x*denom-Math.round(x*denom))>0.001 && denom<=10) denom++; let numer=Math.round(x*denom); if(denom===1) return numer.toString(); return numer+"/"+denom;}
 </script>
+
 </body>
 </html>
