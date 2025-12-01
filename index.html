@@ -4,49 +4,64 @@
 <meta charset="UTF-8">
 <title>方程式ゲーム</title>
 <style>
-body { font-family: sans-serif; padding: 20px; }
-#question { font-size: 24px; margin-bottom: 10px; }
-#time, #score { margin-top: 10px; }
-button { margin: 5px; padding: 10px; }
-#drawing { border:1px solid #000; touch-action: none; }
+body { font-family: sans-serif; margin:0; padding:0; background:#f0f0f0; display:flex; flex-direction:column; align-items:center; }
+#container { width: 360px; background:white; padding:20px; margin-top:20px; box-shadow:0 0 10px rgba(0,0,0,0.3); border-radius:10px; }
+#question { font-size:22px; margin-bottom:10px; text-align:center; }
+#inputArea { display:flex; justify-content:center; margin-bottom:10px; }
+#answer { width:120px; font-size:18px; padding:5px; margin-right:5px; text-align:center; }
+button { padding:10px; margin:3px; font-size:16px; border-radius:5px; }
+#time, #score { margin-top:5px; text-align:center; font-size:16px; }
+#drawing { border:1px solid #000; touch-action:none; margin-top:10px; background:white; }
 </style>
 </head>
 <body>
 
-<h1>方程式ゲーム</h1>
+<div id="container">
 
-<div id="home">
-  <h2>モード選択</h2>
-  <button onclick="startGame('random')">無限モード</button>
-  <button onclick="startGame('challenge')">チャレンジモード</button>
-  <button onclick="startGame('measure')">測定モード</button>
-</div>
+  <div id="home">
+    <h2 style="text-align:center;">モード選択</h2>
+    <div style="text-align:center;">
+      <button onclick="startGame('random')">無限モード</button>
+      <button onclick="startGame('challenge')">チャレンジモード</button>
+      <button onclick="startGame('measure')">測定モード</button>
+    </div>
+  </div>
 
-<div id="game" style="display:none;">
-  <div id="question"></div>
-  <input type="text" id="answer" placeholder="答えを入力">
-  <button onclick="toggleMinus()">±</button>
-  <button onclick="checkAnswer()">解答</button>
-  <div id="time"></div>
-  <div id="score"></div>
-  <button onclick="backHome()">ホームに戻る</button>
+  <div id="game" style="display:none;">
+    <div id="question"></div>
 
-  <h3>メモ欄</h3>
-  <canvas id="drawing" width="300" height="200"></canvas><br>
-  <button onclick="clearCanvas()">リセット</button>
+    <div id="inputArea">
+      <input type="text" id="answer" placeholder="答えを入力">
+      <button onclick="toggleMinus()">±</button>
+      <button onclick="checkAnswer()">解答</button>
+    </div>
+
+    <div id="time"></div>
+    <div id="score"></div>
+    <div style="text-align:center; margin-top:5px;">
+      <button onclick="backHome()">ホームに戻る</button>
+    </div>
+
+    <h3 style="text-align:center;">メモ欄</h3>
+    <canvas id="drawing" width="320" height="180"></canvas><br>
+    <div style="text-align:center;">
+      <button onclick="clearCanvas()">リセット</button>
+    </div>
+  </div>
+
 </div>
 
 <script>
 let mode, a, b, xAnswer, c;
-let score = 0;
-let questionCount = 0;
+let score = 0, questionCount = 0, totalTime = 0;
 const maxQuestions = 10;
-let startTime, totalTime = 0;
+let startTime;
 
 const canvas = document.getElementById('drawing');
 const ctx = canvas.getContext('2d');
 let drawing = false;
 
+// Canvas 手書き設定
 canvas.addEventListener('pointerdown', e=>{drawing=true; ctx.beginPath(); ctx.moveTo(e.offsetX,e.offsetY);});
 canvas.addEventListener('pointermove', e=>{if(drawing){ctx.lineTo(e.offsetX,e.offsetY); ctx.stroke();}});
 canvas.addEventListener('pointerup', e=>{drawing=false;});
@@ -54,27 +69,24 @@ canvas.addEventListener('pointerleave', e=>{drawing=false;});
 
 function clearCanvas(){ctx.clearRect(0,0,canvas.width,canvas.height);}
 
-function startGame(selectedMode) {
-  mode = selectedMode;
-  score = 0;
-  questionCount = 0;
-  totalTime = 0;
-  document.getElementById('home').style.display = 'none';
-  document.getElementById('game').style.display = 'block';
+function startGame(selectedMode){
+  mode=selectedMode; score=0; questionCount=0; totalTime=0;
+  document.getElementById('home').style.display='none';
+  document.getElementById('game').style.display='block';
   generateQuestion();
   updateScore();
   clearCanvas();
 }
 
-function generateQuestion() {
-  const r = ()=>Math.random();
-  a = Math.floor(r()*5)+1;
-  b = Math.floor(r()*21)-10;
+function generateQuestion(){
+  const r=()=>Math.random();
+  a=Math.floor(r()*5)+1;
+  b=Math.floor(r()*21)-10;
 
-  const type = Math.floor(r()*3);
+  const type=Math.floor(r()*3);
   if(type===0) xAnswer=Math.floor(r()*21)-10;
   else if(type===1) xAnswer=Math.round((Math.floor(r()*201)-100)/10*10)/10;
-  else {let denom=Math.floor(r()*9)+2; let numer=Math.floor(r()*denom*10+1)-denom*5; xAnswer=numer/denom;}
+  else { let denom=Math.floor(r()*9)+2; let numer=Math.floor(r()*denom*10+1)-denom*5; xAnswer=numer/denom; }
 
   c=a*xAnswer+b;
   let cStr=(type===2)?toFraction(c):(Math.round(c*10)/10);
@@ -91,43 +103,24 @@ function checkAnswer(){
   try{
     if(input.includes('/')){
       let parts=input.split('/');
-      if(parts.length!==2){ alert("分数は a/b の形式で"); return; }
+      if(parts.length!==2){ alert("分数は a/b 形式で入力"); return; }
       userAns=parseFloat(parts[0])/parseFloat(parts[1]);
-    } else {
-      userAns=parseFloat(input);
-    }
-  }catch(e){document.getElementById('time').innerText="数字または分数を入力してね！"; return;}
+    } else { userAns=parseFloat(input); }
+  }catch(e){document.getElementById('time').innerText="正しい数字または分数を入力"; return;}
 
   let elapsed=(Date.now()-startTime)/1000;
 
   if(Math.abs(userAns-xAnswer)<0.1){
-    score++;
-    updateScore();
+    score++; updateScore();
     if(mode==='measure'){
-      questionCount++;
-      totalTime+=elapsed;
-      if(questionCount>=maxQuestions){
-        alert("測定終了！ 10問の合計時間: "+totalTime+" 秒");
-        backHome();
-        return;
-      }
+      questionCount++; totalTime+=elapsed;
+      if(questionCount>=maxQuestions){ alert("測定終了！ 合計時間:"+totalTime+"秒"); backHome(); return; }
     }
     document.getElementById('time').innerText="正解！ "+elapsed+" 秒";
     generateQuestion();
   } else {
-    if(mode==='challenge'){
-      alert("不正解！ 正しい答え: "+toFraction(xAnswer));
-      backHome();
-      return;
-    }
-    if(mode==='random'){
-      document.getElementById('time').innerText="不正解！ もう一度解こう";
-      return;
-    }
-    if(mode==='measure'){
-      document.getElementById('time').innerText="不正解！ もう一度解こう";
-      return;
-    }
+    if(mode==='challenge'){ alert("不正解！ 正解: "+toFraction(xAnswer)); backHome(); return; }
+    if(mode==='random' || mode==='measure'){ document.getElementById('time').innerText="不正解！ もう一度解こう"; return; }
   }
 }
 
