@@ -80,7 +80,7 @@ button:disabled{opacity:.5}
 <div id="lbRoom" class="hidden">
 <p id="rc"></p>
 <ul id="pl"></ul>
-<p class="note">最大6人。ゲーム中に誰かが抜けるとルームは削除されます。</p>
+<p class="note">最大6人。ゲームを始めたあとに誰かが抜けると、ルームは削除されます。</p>
 <p id="wait" class="note"></p>
 <div class="row2"><button id="go">開始</button><button id="lbQuit">退出</button></div>
 </div>
@@ -100,7 +100,7 @@ function ri(a,b){return Math.floor(Math.random()*(b-a+1))+a}
 function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){}return null}
 var me=ls("eqUid");if(!me){me=Math.random().toString(36).slice(2,10);ls("eqUid",me)}
 var mode=null,score=0,cur=null,best=parseInt(ls("eqBest")||"0",10)||0;
-var offset=0,turnBase="",timeoutFor=null,armed=false,lastNotice;
+var offset=0,turnBase="",timeoutFor=null,armed=false,lastNotice,lastResult;
 var db=null,ref=null,code=null,isHost=false,room=null,lastKey=null,overShown=false,myName="";
 
 function show(id){["home","game","lobby"].forEach(function(s){$(s).classList.toggle("hidden",s!==id)})}
@@ -165,7 +165,7 @@ function setCnt(){$("cnt").textContent="解いた問題数: "+score}
 /* ---- solo ---- */
 function startSolo(m){
   mode=m;score=0;closeDlg();show("game");$("turn").classList.add("hidden");
-  $("inp").disabled=false;$("submit").disabled=false;resize();clearMemo();next();
+  $("inp").disabled=false;$("submit").disabled=false;$("minus").disabled=false;$("slash").disabled=false;resize();clearMemo();next();
 }
 function next(){cur=gen(score);setQ();$("inp").value="";setCnt()}
 function submit(){
@@ -222,7 +222,7 @@ async function joinRoom(){
   }catch(e){toast("参加に失敗しました")}
 }
 function enter(c,host){
-  code=c;isHost=host;overShown=false;lastKey=null;mode="co";armed=false;lastNotice=undefined;
+  code=c;isHost=host;overShown=false;lastKey=null;mode="co";armed=false;lastNotice=undefined;lastResult=undefined;
   ref=db.ref("rooms/"+c);
   ref.child("players/"+me).onDisconnect().remove();
   if(host)ref.onDisconnect().remove();
@@ -234,14 +234,19 @@ function leaveLocal(){
   ref=null;code=null;room=null;overShown=false;closeDlg();mode=null;show("home");
 }
 function quit(){
-  if(mode==="co"&&ref){if(isHost||(room&&room.status==="playing"))ref.remove();else ref.child("players/"+me).remove();leaveLocal()}
+  if(mode==="co"&&ref){if(isHost||(room&&room.played))ref.remove();else ref.child("players/"+me).remove();leaveLocal()}
   else home();
 }
 function onRoom(snap){
   room=snap.val();
   if(!room){if(ref&&!overShown){leaveLocal();toast("誰かが退出したため、ルームが削除されました")}return}
   var ps=room.players||{};
+  if(room.played&&!armed){armed=true;ref.onDisconnect().remove()}
+  var rid=room.result?room.result.id:null;
+  if(lastResult===undefined)lastResult=rid;
+  else if(rid&&rid!==lastResult){lastResult=rid;showResult(room.result)}
   if(room.status==="waiting"){
+    lastKey=null;lastStrokes=null;
     show("lobby");$("lbMenu").classList.add("hidden");$("lbRoom").classList.remove("hidden");
     $("rc").textContent="ルーム番号: "+code+"　制限時間: "+(room.timeLimit?room.timeLimit+"秒/問":"なし");
     var ul=$("pl");ul.innerHTML="";
@@ -250,11 +255,14 @@ function onRoom(snap){
     $("wait").textContent=isHost?(Object.keys(ps).length+"人参加中。準備ができたら開始してください。"):"ホストの開始を待っています…";
   }else if(room.status==="playing"){
     renderPlay(ps);
-  }else if(room.status==="over"&&!overShown){
-    overShown=true;var r=room.result||{};
-    if(isHost||r.byId===me)setTimeout(function(){if(ref)ref.remove()},20000);
-    dlg(r.timeout?"時間切れ！":"不正解！",[(r.by||"誰か")+(r.timeout?" さんが時間内に答えられませんでした":" さんが間違えました"),r.eq||""].concat(r.timeout?[]:[(r.by||"?")+" さんの答え: "+r.given]).concat(["正しい答え: x = "+r.ans,"チームの正解数: "+(r.score||0)+" 問"]),[["タイトルへ",function(){var rr=ref;leaveLocal();rr&&rr.remove()}]]);
   }
+}
+function showResult(r){
+  dlg(r.timeout?"時間切れ！":"不正解！",
+    [(r.by||"誰か")+(r.timeout?" さんが時間内に答えられませんでした":" さんが間違えました"),r.eq||""]
+    .concat(r.timeout?[]:[(r.by||"?")+" さんの答え: "+r.given])
+    .concat(["正しい答え: x = "+r.ans,"チームの正解数: "+(r.score||0)+" 問"]),
+    [["OK",closeDlg]]);
 }
 function renderPlay(ps){
   var order=room.order||[],t=(room.turn||0)%order.length,uid=order[t],myTurn=uid===me;
@@ -268,18 +276,18 @@ function renderPlay(ps){
   if(key!==lastKey){lastKey=key;$("inp").value="";resize();redraw(lastStrokes);if(myTurn)$("inp").focus()}
   if(!myTurn)$("inp").value=room.typing||"";
   turnBase=myTurn?"あなたの番です":(ps[uid]?ps[uid].name:"?")+" さんの番";$("turn").textContent=turnBase;tick();
-  $("inp").disabled=!myTurn;$("submit").disabled=!myTurn;$("minus").disabled=!myTurn;
+  $("inp").disabled=!myTurn;$("submit").disabled=!myTurn;$("minus").disabled=!myTurn;$("slash").disabled=!myTurn;
 }
 function coAnswer(ok,v){
   if(!ref||!room)return;
   var order=room.order||[],n=order.length;
   if(ok){ref.update({score:score+1,turn:((room.turn||0)+1)%n,q:gen(score+1),typing:"",strokes:null,qStart:firebase.database.ServerValue.TIMESTAMP})}
-  else{ref.update({typing:"",notice:{id:Date.now()+me,text:(myName||ls("eqName")||"?")+" さんが不正解（"+v+"）"}});$("inp").value=""}
+  else{ref.update({status:"waiting",played:true,result:{id:Date.now()+me,by:myName||ls("eqName")||"?",given:v,eq:fmt(cur,false),ans:ansText(cur),score:score},order:null,q:null,turn:null,typing:"",strokes:null,notice:null,qStart:null});$("inp").value=""}
 }
 function startCoop(){
   var ids=Object.keys(room.players||{});
   for(var i=ids.length-1;i>0;i--){var j=ri(0,i),t=ids[i];ids[i]=ids[j];ids[j]=t}
-  ref.update({status:"playing",order:ids,turn:0,score:0,q:gen(0),typing:"",strokes:null,qStart:firebase.database.ServerValue.TIMESTAMP});
+  ref.update({status:"playing",order:ids,turn:0,score:0,q:gen(0),typing:"",strokes:null,qStart:firebase.database.ServerValue.TIMESTAMP,played:true,result:null,notice:null});
 }
 
 /* ---- ui ---- */
@@ -304,10 +312,10 @@ function timeoutNow(){
   var qs=room.qStart;
   ref.transaction(function(cu){
     if(!cu||cu.status!=="playing"||cu.qStart!==qs)return;
-    var o=cu.order||[],n=o.length,u=o[(cu.turn||0)%n],pp=cu.players||{};
-    cu.notice={id:Date.now()+"t",text:(pp[u]?pp[u].name:"?")+" さんは時間切れ（答え x = "+ansText(cu.q)+"）"};
-    cu.turn=((cu.turn||0)+1)%n;cu.q=gen(cu.score||0);cu.typing="";delete cu.strokes;
-    cu.qStart=firebase.database.ServerValue.TIMESTAMP;
+    var o=cu.order||[],u=o[(cu.turn||0)%(o.length||1)],pp=cu.players||{};
+    cu.result={id:Date.now()+"t",by:pp[u]?pp[u].name:"?",given:"-",eq:fmt(cu.q,false),ans:ansText(cu.q),score:cu.score||0,timeout:true};
+    cu.status="waiting";cu.played=true;
+    delete cu.order;delete cu.q;delete cu.turn;delete cu.typing;delete cu.strokes;delete cu.notice;delete cu.qStart;
     return cu;
   });
 }
