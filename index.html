@@ -183,10 +183,11 @@ function enter(c,host){
   ref=db.ref("rooms/"+c);
   ref.child("players/"+me).onDisconnect().remove();
   if(host)ref.onDisconnect().remove();
+  ref.child("strokes").on("value",onStrokes);
   ref.on("value",onRoom);
 }
 function leaveLocal(){
-  if(ref){ref.off();ref.child("players/"+me).onDisconnect().cancel();if(isHost)ref.onDisconnect().cancel()}
+  if(ref){ref.child("strokes").off();ref.off();ref.child("players/"+me).onDisconnect().cancel();if(isHost)ref.onDisconnect().cancel()}
   ref=null;code=null;room=null;overShown=false;closeDlg();mode=null;show("home");
 }
 function quit(){
@@ -221,7 +222,7 @@ function renderPlay(ps){
   show("game");$("turn").classList.remove("hidden");
   cur=room.q;score=room.score||0;setQ();setCnt();
   var key=String(score);
-  if(key!==lastKey){lastKey=key;$("inp").value="";resize();if(myTurn)$("inp").focus()}
+  if(key!==lastKey){lastKey=key;$("inp").value="";resize();redraw(lastStrokes);if(myTurn)$("inp").focus()}
   if(!myTurn)$("inp").value=room.typing||"";
   $("turn").textContent=myTurn?"あなたの番です":(ps[uid]?ps[uid].name:"?")+" さんの番";
   $("inp").disabled=!myTurn;$("submit").disabled=!myTurn;$("minus").disabled=!myTurn;
@@ -229,13 +230,13 @@ function renderPlay(ps){
 function coAnswer(ok,v){
   if(!ref||!room)return;
   var order=room.order||[],n=order.length;
-  if(ok){ref.update({score:score+1,turn:((room.turn||0)+1)%n,q:gen(score+1),typing:""})}
+  if(ok){ref.update({score:score+1,turn:((room.turn||0)+1)%n,q:gen(score+1),typing:"",strokes:null})}
   else ref.update({status:"over",result:{by:myName||ls("eqName")||"?",byId:me,given:v,eq:fmt(cur),ans:cur.x,score:score}});
 }
 function startCoop(){
   var ids=Object.keys(room.players||{});
   for(var i=ids.length-1;i>0;i--){var j=ri(0,i),t=ids[i];ids[i]=ids[j];ids[j]=t}
-  ref.update({status:"playing",order:ids,turn:0,score:0,q:gen(0),typing:""});
+  ref.update({status:"playing",order:ids,turn:0,score:0,q:gen(0),typing:"",strokes:null});
 }
 
 /* ---- ui ---- */
@@ -258,11 +259,42 @@ $("mk").onclick=createRoom;$("jn").onclick=joinRoom;$("go").onclick=startCoop;
 var cv=$("memo"),ctx=cv.getContext("2d"),drawing=false;
 function resize(){var r=cv.getBoundingClientRect();if(!r.width)return;var d=window.devicePixelRatio||1;cv.width=r.width*d;cv.height=r.height*d;ctx.setTransform(d,0,0,d,0,0);ctx.lineWidth=3;ctx.lineCap="round";ctx.lineJoin="round";ctx.strokeStyle="#000"}
 function pos(e){var r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top}}
-cv.addEventListener("pointerdown",function(e){drawing=true;cv.setPointerCapture(e.pointerId);var p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x+0.1,p.y);ctx.stroke()});
-cv.addEventListener("pointermove",function(e){if(!drawing)return;var p=pos(e);ctx.lineTo(p.x,p.y);ctx.stroke()});
-["pointerup","pointercancel"].forEach(function(n){cv.addEventListener(n,function(){drawing=false})});
+var sref=null,pts=[],lastPush=0,lastStrokes=null;
+function isMyTurn(){
+  if(mode!=="co")return true;
+  if(!room||room.status!=="playing")return false;
+  var o=room.order||[];return o[(room.turn||0)%o.length]===me;
+}
+function npos(e){var r=cv.getBoundingClientRect();return[(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]}
+function pushStroke(){if(!sref)return;sref.set(pts.map(function(q){return q[0].toFixed(3)+","+q[1].toFixed(3)}).join(";"));lastPush=Date.now()}
+cv.addEventListener("pointerdown",function(e){
+  if(!isMyTurn())return;
+  drawing=true;cv.setPointerCapture(e.pointerId);var p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x+0.1,p.y);ctx.stroke();
+  if(mode==="co"&&ref){pts=[npos(e)];sref=ref.child("strokes").push();pushStroke()}
+});
+cv.addEventListener("pointermove",function(e){
+  if(!drawing)return;var p=pos(e);ctx.lineTo(p.x,p.y);ctx.stroke();
+  if(sref){pts.push(npos(e));if(Date.now()-lastPush>80)pushStroke()}
+});
+["pointerup","pointercancel"].forEach(function(n){cv.addEventListener(n,function(){
+  if(!drawing)return;drawing=false;if(sref){pushStroke();sref=null}
+})});
 function clearMemo(){ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,cv.width,cv.height);ctx.restore()}
-$("clear").onclick=clearMemo;
+function redraw(v){
+  lastStrokes=v;var r=cv.getBoundingClientRect();if(!r.width)return;
+  clearMemo();ctx.strokeStyle="#000";
+  Object.keys(v||{}).forEach(function(k){
+    var a=String(v[k]).split(";").map(function(t){var q=t.split(",");return[q[0]*r.width,q[1]*r.height]});
+    ctx.beginPath();ctx.moveTo(a[0][0],a[0][1]);ctx.lineTo(a[0][0]+0.1,a[0][1]);
+    for(var i=1;i<a.length;i++)ctx.lineTo(a[i][0],a[i][1]);
+    ctx.stroke();
+  });
+}
+function onStrokes(sn){if(!drawing)redraw(sn.val())}
+$("clear").onclick=function(){
+  if(mode==="co"){if(isMyTurn()&&ref)ref.child("strokes").remove();else toast("自分の番のときだけ消せます")}
+  else clearMemo();
+};
 })();
 </script>
 </body>
