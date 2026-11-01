@@ -28,6 +28,9 @@ button:disabled{opacity:.5}
 .row{display:flex;gap:calc(8*var(--d));margin:calc(19*var(--d)) 0 0 calc(20*var(--d))}
 .row button{width:calc(80*var(--d))}
 .row2{display:flex;gap:calc(8*var(--d));margin:calc(16*var(--d)) 0 0 calc(20*var(--d))}
+.fr{display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;font-size:.75em;line-height:1.15;margin:0 .1em}
+.fr i{font-style:normal;border-bottom:calc(1.5*var(--d)) solid #777;padding:0 .15em}
+.fr b{font-weight:400}
 #cnt,#turn{margin:calc(36*var(--d)) 0 0;padding:0 calc(16*var(--d));font-size:calc(13*var(--d));line-height:calc(18*var(--d));color:#777}
 #turn{margin-top:calc(4*var(--d));color:#6200ee}
 #memo{display:block;width:calc(100% - 32*var(--d));height:calc(200*var(--d));margin:calc(21*var(--d)) calc(16*var(--d)) 0;background:#fff;touch-action:none}
@@ -59,12 +62,12 @@ button:disabled{opacity:.5}
 
 <div id="game" class="hidden">
 <div id="q"></div>
-<input id="inp" class="ed" type="text" inputmode="numeric" placeholder="答えを入力" autocomplete="off">
-<div class="row"><button id="minus">-</button><button id="submit">解答</button></div>
+<input id="inp" class="ed" type="text" inputmode="decimal" placeholder="答えを入力" autocomplete="off">
+<div class="row"><button id="minus">-</button><button id="slash">/</button><button id="submit">解答</button></div>
 <p id="cnt"></p>
 <p id="turn" class="hidden"></p>
 <canvas id="memo"></canvas>
-<div class="row2"><button id="clear">メモ欄リセット</button><button id="quit">タイトルへ</button></div>
+<div class="row2"><button id="clear">メモ欄リセット</button></div>
 </div>
 
 <div id="lobby" class="pad hidden">
@@ -77,7 +80,7 @@ button:disabled{opacity:.5}
 <div id="lbRoom" class="hidden">
 <p id="rc"></p>
 <ul id="pl"></ul>
-<p class="note">最大6人。誰かが間違えるとルームは削除されます。</p>
+<p class="note">最大6人。ゲーム中に誰かが抜けるとルームは削除されます。</p>
 <p id="wait" class="note"></p>
 <div class="row2"><button id="go">開始</button><button id="lbQuit">退出</button></div>
 </div>
@@ -97,7 +100,7 @@ function ri(a,b){return Math.floor(Math.random()*(b-a+1))+a}
 function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){}return null}
 var me=ls("eqUid");if(!me){me=Math.random().toString(36).slice(2,10);ls("eqUid",me)}
 var mode=null,score=0,cur=null,best=parseInt(ls("eqBest")||"0",10)||0;
-var offset=0,turnBase="",timeoutFor=null;
+var offset=0,turnBase="",timeoutFor=null,armed=false,lastNotice;
 var db=null,ref=null,code=null,isHost=false,room=null,lastKey=null,overShown=false,myName="";
 
 function show(id){["home","game","lobby"].forEach(function(s){$(s).classList.toggle("hidden",s!==id)})}
@@ -111,15 +114,52 @@ function dlg(title,lines,btns){
 }
 function closeDlg(){$("dlg").classList.add("hidden")}
 
+function gcd(a,b){a=Math.abs(a);b=Math.abs(b);while(b){var t=a%b;a=b;b=t}return a||1}
+function R(n,d){d=d||1;if(d<0){n=-n;d=-d}var g=gcd(n,d);return [n/g+0,d/g]}
+function add(p,q){return R(p[0]*q[1]+q[0]*p[1],p[1]*q[1])}
+function mul(p,q){return R(p[0]*q[0],p[1]*q[1])}
+function req(p,q){return p[0]*q[1]===q[0]*p[1]}
+function nz(f){var v=0;while(v===0)v=f();return v}
 function gen(s){
-  var l=Math.min(s,30),a=ri(1,3+Math.floor(l/3));
-  if(l>=3&&Math.random()<0.4)a=-a;
-  var mx=10+Math.floor(l/2),x=ri(-mx,mx),b=0;
-  while(b===0)b=ri(-(10+l),10+l);
-  return {a:a,b:b,x:x,c:a*x+b};
+  var l=Math.min(s,30),r=Math.random(),t=(s<2||r<0.4)?"i":(r<0.7?"d":"f"),a,b,x;
+  if(t==="i"){
+    var mx=10+Math.floor(l/2);
+    a=R(nz(function(){var m=ri(1,3+Math.floor(l/3));return(l>=3&&Math.random()<0.4)?-m:m}));
+    x=R(ri(-mx,mx));b=R(nz(function(){return ri(-(10+l),10+l)}));
+  }else if(t==="d"){
+    a=R(nz(function(){return ri(-20,20)}),10);x=R(ri(-30,30),10);b=R(nz(function(){return ri(-50,50)}),10);
+  }else{
+    var q1=ri(2,5),q2=ri(2,5),q3=ri(1,4);
+    a=R(nz(function(){return ri(-2*q1,2*q1)}),q1);b=R(nz(function(){return ri(-2*q2,2*q2)}),q2);x=R(ri(-12,12),q3);
+  }
+  return {t:t,a:a,b:b,x:x,c:add(mul(a,x),b)};
 }
-function fmt(q){return q.a+"x "+(q.b<0?"- "+(-q.b):"+ "+q.b)+" = "+q.c+".0"}
-function setQ(){$("q").textContent=fmt(cur)+" を解け"}
+function dec(p){var s=(p[0]/p[1]).toFixed(2);if(/0$/.test(s))s=s.slice(0,-1);return s}
+function fr(p,h){
+  if(p[1]===1)return String(p[0]);
+  var n=Math.abs(p[0]),sg=p[0]<0?"-":"";
+  return h?sg+'<span class="fr"><i>'+n+'</i><b>'+p[1]+'</b></span>':sg+n+"/"+p[1];
+}
+function num(p,t,h){return t==="f"?fr(p,h):t==="d"?dec(p):String(p[0])}
+function fmt(q,h){
+  var an=num(q.a,q.t,h);
+  if(q.t==="f"&&q.a[1]!==1&&!h)an="("+an+")";
+  var bn=num([Math.abs(q.b[0]),q.b[1]],q.t,h);
+  var cn=q.t==="i"?q.c[0]+".0":num(q.c,q.t,h);
+  return an+"x "+(q.b[0]<0?"- ":"+ ")+bn+" = "+cn;
+}
+function ansText(q){return num(q.x,q.t,false)}
+function parseAns(v){
+  v=v.trim().replace(/[−ー－]/g,"-").replace(/／/g,"/").replace(/[．。]/g,".");
+  var m;
+  if(/^-?\d{1,9}$/.test(v))return R(parseInt(v,10));
+  if((m=/^(-?)(\d*)\.(\d{1,6})$/.exec(v))){
+    var n=parseInt((m[2]||"0")+m[3],10)*(m[1]?-1:1);return R(n,Math.pow(10,m[3].length));
+  }
+  if((m=/^(-?\d{1,9})\/(\d{1,9})$/.exec(v))){var d=parseInt(m[2],10);if(d!==0)return R(parseInt(m[1],10),d)}
+  return null;
+}
+function setQ(){$("q").innerHTML=fmt(cur,true)+" を解け"}
 function setCnt(){$("cnt").textContent="解いた問題数: "+score}
 
 /* ---- solo ---- */
@@ -130,13 +170,13 @@ function startSolo(m){
 function next(){cur=gen(score);setQ();$("inp").value="";setCnt()}
 function submit(){
   var v=$("inp").value.trim().replace(/[−ー－]/g,"-");
-  if(!/^-?\d+$/.test(v))return;
-  var ok=parseInt(v,10)===cur.x;
+  var pa=parseAns(v);if(!pa)return;
+  var ok=req(pa,cur.x);
   if(mode==="co")return coAnswer(ok,v);
   if(ok){score++;next();return}
   if(mode==="inf"){toast("不正解… もう一度！");$("inp").select();return}
   if(score>best){best=score;ls("eqBest",String(best))}
-  dlg("不正解！",[fmt(cur),"答え: x = "+cur.x,"正解数: "+score+" 問","ベスト: "+best+" 問"],[["タイトルへ",home],["もう一度",function(){startSolo("ch")}]]);
+  dlg("不正解！",[fmt(cur),"答え: x = "+ansText(cur),"正解数: "+score+" 問","ベスト: "+best+" 問"],[["タイトルへ",home],["もう一度",function(){startSolo("ch")}]]);
 }
 function home(){closeDlg();mode=null;show("home")}
 
@@ -182,7 +222,7 @@ async function joinRoom(){
   }catch(e){toast("参加に失敗しました")}
 }
 function enter(c,host){
-  code=c;isHost=host;overShown=false;lastKey=null;mode="co";
+  code=c;isHost=host;overShown=false;lastKey=null;mode="co";armed=false;lastNotice=undefined;
   ref=db.ref("rooms/"+c);
   ref.child("players/"+me).onDisconnect().remove();
   if(host)ref.onDisconnect().remove();
@@ -190,16 +230,16 @@ function enter(c,host){
   ref.on("value",onRoom);
 }
 function leaveLocal(){
-  if(ref){ref.child("strokes").off();ref.off();ref.child("players/"+me).onDisconnect().cancel();if(isHost)ref.onDisconnect().cancel()}
+  if(ref){ref.child("strokes").off();ref.off();ref.child("players/"+me).onDisconnect().cancel();ref.onDisconnect().cancel()}
   ref=null;code=null;room=null;overShown=false;closeDlg();mode=null;show("home");
 }
 function quit(){
-  if(mode==="co"&&ref){if(isHost)ref.remove();else ref.child("players/"+me).remove();leaveLocal()}
+  if(mode==="co"&&ref){if(isHost||(room&&room.status==="playing"))ref.remove();else ref.child("players/"+me).remove();leaveLocal()}
   else home();
 }
 function onRoom(snap){
   room=snap.val();
-  if(!room){if(ref&&!overShown){leaveLocal();toast("ルームが削除されました")}return}
+  if(!room){if(ref&&!overShown){leaveLocal();toast("誰かが退出したため、ルームが削除されました")}return}
   var ps=room.players||{};
   if(room.status==="waiting"){
     show("lobby");$("lbMenu").classList.add("hidden");$("lbRoom").classList.remove("hidden");
@@ -218,10 +258,10 @@ function onRoom(snap){
 }
 function renderPlay(ps){
   var order=room.order||[],t=(room.turn||0)%order.length,uid=order[t],myTurn=uid===me;
-  if(isHost&&!ps[uid]){
-    for(var i=1;i<=order.length;i++){var j=(t+i)%order.length;if(ps[order[j]]){ref.update({turn:j});return}}
-    ref.remove();return;
-  }
+  if(!armed){armed=true;ref.onDisconnect().remove()}
+  var nid=room.notice?room.notice.id:null;
+  if(lastNotice===undefined)lastNotice=nid;
+  else if(nid&&nid!==lastNotice){lastNotice=nid;toast(room.notice.text)}
   show("game");$("turn").classList.remove("hidden");
   cur=room.q;score=room.score||0;setQ();setCnt();
   var key=String(score);
@@ -234,7 +274,7 @@ function coAnswer(ok,v){
   if(!ref||!room)return;
   var order=room.order||[],n=order.length;
   if(ok){ref.update({score:score+1,turn:((room.turn||0)+1)%n,q:gen(score+1),typing:"",strokes:null,qStart:firebase.database.ServerValue.TIMESTAMP})}
-  else ref.update({status:"over",result:{by:myName||ls("eqName")||"?",byId:me,given:v,eq:fmt(cur),ans:cur.x,score:score}});
+  else{ref.update({typing:"",notice:{id:Date.now()+me,text:(myName||ls("eqName")||"?")+" さんが不正解（"+v+"）"}});$("inp").value=""}
 }
 function startCoop(){
   var ids=Object.keys(room.players||{});
@@ -254,18 +294,20 @@ function pushTyping(){
 }
 $("minus").onclick=function(){var i=$("inp");i.value=i.value.charAt(0)==="-"?i.value.slice(1):"-"+i.value;i.focus();pushTyping()};
 $("inp").addEventListener("input",pushTyping);
+$("slash").onclick=function(){var i=$("inp");i.value+="/";i.focus();pushTyping()};
 $("inp").addEventListener("keydown",function(e){if(e.key==="Enter")submit()});
-$("quit").onclick=quit;$("lbQuit").onclick=quit;
+$("lbQuit").onclick=quit;
 $("lbBack").onclick=function(){mode=null;show("home")};
 $("mk").onclick=createRoom;$("jn").onclick=joinRoom;$("go").onclick=startCoop;
 
 function timeoutNow(){
-  var sc=room.score||0;
+  var qs=room.qStart;
   ref.transaction(function(cu){
-    if(!cu||cu.status!=="playing"||(cu.score||0)!==sc)return;
-    var o=cu.order||[],u=o[(cu.turn||0)%o.length],pp=cu.players||{};
-    cu.status="over";
-    cu.result={by:pp[u]?pp[u].name:"?",byId:u||"",eq:fmt(cu.q),ans:cu.q.x,score:sc,given:"-",timeout:true};
+    if(!cu||cu.status!=="playing"||cu.qStart!==qs)return;
+    var o=cu.order||[],n=o.length,u=o[(cu.turn||0)%n],pp=cu.players||{};
+    cu.notice={id:Date.now()+"t",text:(pp[u]?pp[u].name:"?")+" さんは時間切れ（答え x = "+ansText(cu.q)+"）"};
+    cu.turn=((cu.turn||0)+1)%n;cu.q=gen(cu.score||0);cu.typing="";delete cu.strokes;
+    cu.qStart=firebase.database.ServerValue.TIMESTAMP;
     return cu;
   });
 }
