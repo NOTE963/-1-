@@ -93,7 +93,7 @@ canvas{display:block;width:calc(100% - 32px);height:200px;margin:20px 16px 0;bac
 
 <div id="coop" class="screen pad">
 <h2>協力モード</h2>
-<p class="sub">最大7人でチャレンジ。誰か1人がミスしたらルームに戻って最初から!</p>
+<p class="sub">最大7人で順番に1問ずつ解くチャレンジ。誰か1人がミスしたらルームに戻って最初から!</p>
 <input class="tin" id="cname" maxlength="10" placeholder="名前">
 <div class="bt" style="margin-top:16px"><button onclick="createRoom()">ルームを作る</button></div>
 <p class="sub" style="margin-top:24px">または、ルーム番号(4桁)で参加</p>
@@ -212,7 +212,7 @@ function start(){
 }
 const tick=()=>$('#sw').textContent=fmt(performance.now()-t0);
 function fmt(ms){const s=ms/1000,m=Math.floor(s/60);return String(m).padStart(2,'0')+':'+(s%60).toFixed(2).padStart(5,'0')}
-let seed=0,qi=0;
+let seed=0,qi=0,shownQ=-1;
 function next(){
  rnd=mode==='coop'?mb(seed*1000+qi++):Math.random;
  cur=gen(types[R(0,types.length-1)]);rnd=Math.random;
@@ -236,7 +236,7 @@ function submit(){
  if(cur.k==='pair'){v.sort((a,b)=>a-b);exp.sort((a,b)=>a-b)}
  if(v.every((x,i)=>Math.abs(x-exp[i])<1e-6)){
   solved++;msg.style.color='#1b8a3a';msg.textContent='✔ 正解!';
-  if(mode==='coop')roomRef.child('players/'+pid+'/count').set(solved);
+  if(mode==='coop'){coopAdvance();return}
   if(mode==='time'&&solved>=10){finish();return}
   next();
  }else if(mode==='chal')finish();
@@ -295,7 +295,7 @@ async function createRoom(){
  setName($('#cname').value);
  for(let i=0;i<6;i++){
   const code=String(R(0,9999)).padStart(4,'0');
-  try{const res=await db.ref('rooms/'+code).transaction(c=>c?undefined:{state:'lobby',host:pid,round:0,seed:0,types:'L',failedBy:'',lastScore:0,lastNames:'',players:{[pid]:{name:pname,count:0}}});
+  try{const res=await db.ref('rooms/'+code).transaction(c=>c?undefined:{state:'lobby',host:pid,round:0,seed:0,types:'L',failedBy:'',turn:'',qn:0,lastScore:0,lastNames:'',players:{[pid]:{name:pname,count:0}}});
    if(res.committed){enterRoom(code,true);return}}catch(e){return cmsg('作成に失敗しました')}
  }
  cmsg('作成に失敗しました');
@@ -325,9 +325,11 @@ function onRoom(r){
  if(!roomRef)return;
  if(!r){leaveRoom(true,'ルームが閉じられました');return}
  rm=r;
- if(r.state==='playing'&&r.round!==playedRound){playedRound=r.round;startCoop(r)}
- else if(r.state==='lobby'){if(coopPlaying){coopPlaying=false;over=true;show('lobby')}renderLobby(r)}
- if(coopPlaying)renderCb(r);
+ if(r.state==='playing'){
+  const pl=r.players||{};
+  if(!pl[r.turn]&&Object.keys(pl).sort()[0]===pid)roomRef.child('turn').set(pid);
+  if(r.round!==playedRound){playedRound=r.round;startCoop(r)}else if(coopPlaying)coopRender(r);
+ }else if(r.state==='lobby'){if(coopPlaying){coopPlaying=false;over=true;show('lobby')}renderLobby(r)}
 }
 function renderLobby(r){
  $('#lcode').textContent=roomCode;
@@ -340,15 +342,34 @@ function renderLobby(r){
 function coopStart(){
  const ts=[...document.querySelectorAll('.lty:checked')].map(c=>c.value).join('');
  if(!ts)return alert('方程式を1つ以上選んでください');
- roomRef.update({state:'playing',seed:R(1,999999),round:(rm.round||0)+1,types:ts,failedBy:''});
+ roomRef.update({state:'playing',seed:R(1,999999),round:(rm.round||0)+1,types:ts,failedBy:'',turn:Object.keys(rm.players||{}).sort()[0],qn:0});
 }
 function startCoop(r){
- mode='coop';types=r.types.split('');seed=r.seed;qi=0;coopPlaying=true;reset();
- $('#cb').style.display='block';next();renderCb(r);
+ mode='coop';coopPlaying=true;shownQ=-1;reset();
+ $('#cb').style.display='block';coopRender(r);
+}
+function coopRender(r){
+ seed=r.seed;types=r.types.split('');
+ if(r.qn!==shownQ){shownQ=r.qn;qi=r.qn;next();clearMemo()}
+ const mine=r.turn===pid,t=(r.players||{})[r.turn],m=$('#msg');
+ over=!mine;
+ document.querySelectorAll('#ins input').forEach(i=>i.disabled=!mine);
+ m.style.color=mine?'#6200ee':'#757575';
+ m.textContent=mine?'▶ あなたの番!':(t?t.name+'さんの番です':'');
+ if(mine)document.querySelector('#ins input').focus();
+ renderCb(r);
+}
+async function coopAdvance(){
+ over=true;
+ try{await roomRef.transaction(c=>{
+  if(!c)return c;if(c.state!=='playing'||c.turn!==pid)return;
+  const ks=Object.keys(c.players||{}).sort();
+  c.players[pid].count=(c.players[pid].count||0)+1;
+  c.qn=(c.qn||0)+1;c.turn=ks[(ks.indexOf(pid)+1)%ks.length];return c})}catch(e){}
 }
 function renderCb(r){
- const pl=Object.values(r.players||{});
- $('#cb').textContent='チーム合計: '+pl.reduce((s,p)=>s+(p.count||0),0)+'問 ('+pl.map(p=>p.name+' '+(p.count||0)).join(' / ')+')';
+ const pl=Object.entries(r.players||{});
+ $('#cb').textContent='チーム合計: '+pl.reduce((s,[k,p])=>s+(p.count||0),0)+'問 ('+pl.map(([k,p])=>(k===r.turn?'▶':'')+p.name+' '+(p.count||0)).join(' / ')+')';
 }
 async function coopMiss(){
  let did=false,sum=0,nm='';
